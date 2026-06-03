@@ -1,62 +1,73 @@
 # hl-liquidation-heatmap
 
-Realized BTC (ETH/SOL) liquidation heatmap for Hyperliquid perps.
+Realized BTC (ETH/SOL) liquidation heatmap for Hyperliquid perps.  
+Price level (y) × time (x) · color = long/short dominant · intensity = notional.
 
-## Why a streamer, not a REST pull?
+![BTC Liquidation Heatmap](screenshot.png)
 
-There is no free, no-auth HTTP endpoint for historical Hyperliquid liquidations:
+## How it works
+
+Hyperliquid exposes no liquidation flag on any public REST or WebSocket endpoint.  
+After testing every available source:
 
 | Source | Why it fails |
 |--------|-------------|
-| HL REST API | No liquidation flag on any public endpoint |
+| HL REST `userFillsByTime` | Returns empty for HLP vault |
+| HL WebSocket `trades` | No `dir` or `liquidation` field |
 | Dune free tier | No fills table; ad-hoc SQL is paid-only |
-| `swell-network` Dune dataset | Wallet leaderboard only — no trades |
 | Hydromancer S3 | Requester-pays, needs AWS credentials |
-| HL official S3 | Needs AWS CLI + LZ4, monthly updates, may be missing |
+| HL official S3 | Needs AWS CLI + LZ4 decompress |
 
-Solution: subscribe to the HL WebSocket trades feed, detect liquidation fills
-in real-time, persist to local SQLite. Run `stream.py` in the background.
+**Solution:** subscribe to `activeAssetCtx` (1s updates), detect open interest drops,  
+infer liquidation price and notional from `markPx × OI_delta`. Chain-native, no auth required.
+
+```
+OI drops sharply + price moving → liquidation cascade at that price level
+```
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
+cp env.example .env
 ```
 
 ## Usage
 
 ```bash
-# Step 1 — start the streamer (runs in background, Ctrl+C to stop)
+# 1 — start the streamer (background, auto-reconnects)
 python stream.py --coins BTC,ETH,SOL
 
-# Step 2 — once you have data, render the heatmap
-python main.py --coin BTC --days 7
+# Run as background daemon
+nohup python stream.py --coins BTC,ETH,SOL > stream.log 2>&1 &
 
-# Save to file
-python main.py --coin BTC --output btc_liqs.png
+# 2 — render heatmap from captured data
+python main.py --coin BTC --days 1
+python main.py --coin BTC --days 1 --output btc.png && open btc.png
 ```
 
-The streamer reconnects automatically on disconnect. Leave it running
-during volatile periods for the best signal density.
+Leave the streamer running during volatile sessions. 1h of data gives  
+meaningful price-level clustering. Asian session close (00:00–02:00 UTC)  
+and EU open (07:00–09:00 UTC) tend to be most active.
 
 ## Structure
 
 ```
 hl-liquidation-heatmap/
-├── stream.py       # WebSocket daemon — captures live liquidations to SQLite
-├── main.py         # CLI — renders heatmap from local DB
-├── fetcher.py      # DB read/write helpers
-├── processor.py    # Price bucketing + heatmap matrix builder
-├── visualizer.py   # Matplotlib renderer (dark theme)
-├── requirements.txt
-└── liquidations.db # Created automatically by stream.py
+├── stream.py       # WebSocket daemon — OI-delta inference → SQLite
+├── main.py         # CLI entrypoint
+├── fetcher.py      # DB helpers
+├── processor.py    # Price bucketing + heatmap matrix
+├── visualizer.py   # Matplotlib dark-theme renderer
+└── requirements.txt
 ```
 
-## Liquidation detection
+## Signal quality
 
-HL trades feed sends fill pairs. Liquidation fills are identified by:
-1. `liquidation` key present in the fill dict
-2. `dir` field containing `"liquidation"` (e.g. `"Buy (Liquidation)"`)
+OI-delta inference captures both market and backstop liquidations.  
+False positives (large voluntary closes) are possible in calm markets;  
+during cascades the signal is clean. Threshold tuning in `stream.py`:
 
-Side interpretation: `B` (buy) = HLP taking over a long position = long liquidation.
-`A` (sell) = HLP taking over a short position = short liquidation.
+```python
+MIN_DROP = {"BTC": 0.01, "ETH": 0.1, "SOL": 1.0}  # coin units
+```
