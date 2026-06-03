@@ -1,0 +1,24 @@
+# env
+.env
+
+# DB and logs
+*.db
+*.log
+
+# Output images
+*.png
+*.pdf
+
+# Debug scripts (not part of the public repo)
+debug_*.py
+dune_*.sql
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# macOS
+.DS_Store
