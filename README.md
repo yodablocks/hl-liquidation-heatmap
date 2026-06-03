@@ -3,7 +3,8 @@
 Realized BTC (ETH/SOL) liquidation heatmap for Hyperliquid perps.  
 Price level (y) × time (x) · color = long/short dominant · intensity = notional.
 
-![BTC Liquidation Heatmap](screenshot.png)
+![BTC Liquidation Heatmap — 2h capture, Asian session close](screenshot.png)
+> *2h capture · Asian session close (06:30–08:30 Paris) · 1,557 events · $226M notional*
 
 ## How it works
 
